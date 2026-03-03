@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 外圆（白色边框） -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,24C37.43,24 24,37.43 24,54s13.43,30 30,30 30,-13.43 30,-30S70.57,24 54,24z" />
+    <!-- 内圆（红色录制点） -->
+    <path
+        android:fillColor="#FF0000"
+        android:pathData="M54,36C44.06,36 36,44.06 36,54s8.06,18 18,18 18,-8.06 18,-18S63.94,36 54,36z" />
+</vector>
