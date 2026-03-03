@@ -98,8 +98,6 @@ class FloatingCameraWindow(
         cameraView = inflater.inflate(R.layout.floating_camera_window, null)
         previewView = cameraView?.findViewById(R.id.preview_view)
 
-        applyCircularClip()
-
         cameraView?.setOnTouchListener { _, event ->
             scaleGestureDetector.onTouchEvent(event)
             gestureDetector.onTouchEvent(event)
@@ -221,8 +219,6 @@ class FloatingCameraWindow(
             params.x = savedCameraX
             params.y = savedCameraY
 
-            applyCircularClip()
-
             // 恢复停止按钮并同步位置
             stopBtnView?.visibility = View.VISIBLE
             syncStopButtonPosition(savedCameraX, savedCameraY)
@@ -232,15 +228,6 @@ class FloatingCameraWindow(
     }
 
     // ── 工具方法 ──────────────────────────────────────────────────
-
-    private fun applyCircularClip() {
-        cameraView?.outlineProvider = object : ViewOutlineProvider() {
-            override fun getOutline(view: View, outline: Outline) {
-                outline.setOval(0, 0, view.width, view.height)
-            }
-        }
-        cameraView?.clipToOutline = true
-    }
 
     private fun makeOverlayParams(
         width: Int, height: Int, x: Int, y: Int
