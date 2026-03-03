@@ -1,7 +1,6 @@
 package com.example.screenrecorder.ui
 
 import android.content.Context
-import android.graphics.Outline
 import android.graphics.PixelFormat
 import android.util.DisplayMetrics
 import android.view.GestureDetector
@@ -10,7 +9,6 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.view.WindowManager
 import android.widget.ImageButton
 import androidx.camera.core.CameraSelector
@@ -206,9 +204,6 @@ class FloatingCameraWindow(
             params.height = metrics.heightPixels
             params.x = 0
             params.y = 0
-
-            cameraView?.outlineProvider = null
-            cameraView?.clipToOutline = false
 
             // 全屏时隐藏停止按钮（全屏画面不遮挡）
             stopBtnView?.visibility = View.GONE
