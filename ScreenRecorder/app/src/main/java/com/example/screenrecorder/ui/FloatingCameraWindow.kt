@@ -3,6 +3,7 @@ package com.example.screenrecorder.ui
 import android.content.Context
 import android.graphics.PixelFormat
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -11,21 +12,38 @@ import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.WindowManager
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FileOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import com.example.screenrecorder.R
+import java.io.File
 import kotlin.math.roundToInt
 
 class FloatingCameraWindow(
     private val context: Context,
-    private val onStopRecording: () -> Unit
+    private val onStopRecording: () -> Unit,
+    private val onPauseRecording: () -> Unit,
+    private val onResumeRecording: () -> Unit,
+    private val onSwitchToCameraOnly: () -> Unit,
+    private val onSwitchToFullScreen: () -> Unit
 ) : LifecycleOwner {
+
+    companion object {
+        private const val TAG = "FloatingCameraWindow"
+    }
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     override val lifecycle: Lifecycle get() = lifecycleRegistry
@@ -37,9 +55,9 @@ class FloatingCameraWindow(
     private var cameraParams: WindowManager.LayoutParams? = null
     private var previewView: PreviewView? = null
 
-    // 独立的停止按钮悬浮窗
-    private var stopBtnView: View? = null
-    private var stopBtnParams: WindowManager.LayoutParams? = null
+    // 控制面板悬浮窗
+    private var panelView: View? = null
+    private var panelParams: WindowManager.LayoutParams? = null
 
     private val metrics = DisplayMetrics().also {
         @Suppress("DEPRECATION")
@@ -50,12 +68,14 @@ class FloatingCameraWindow(
     private val minSizePx = (80 * density).roundToInt()
     private val maxSizePx = (300 * density).roundToInt()
     private val defaultSizePx = (120 * density).roundToInt()
-    // 停止按钮尺寸：44dp，紧贴摄像头圆形右侧 8dp 间距
-    private val stopBtnSizePx = (44 * density).roundToInt()
-    private val stopBtnGapPx = (8 * density).roundToInt()
+    private val panelGapPx = (8 * density).roundToInt()
 
     private var currentSize = defaultSizePx
     private var isFullscreen = false
+    private var isPanelExpanded = false
+    private var isPaused = false
+    var isCameraOnlyMode = true
+        private set
     private var savedSize = defaultSizePx
     private var savedCameraX = 0
     private var savedCameraY = 100
@@ -69,24 +89,44 @@ class FloatingCameraWindow(
     private lateinit var scaleGestureDetector: ScaleGestureDetector
     private lateinit var gestureDetector: GestureDetector
 
-    fun show() {
+    // 控制面板中的按钮
+    private var btnTogglePanel: ImageButton? = null
+    private var btnPauseResume: ImageButton? = null
+    private var btnToggleRecordMode: ImageButton? = null
+    private var panelButtons: LinearLayout? = null
+
+    // CameraX VideoCapture（用于只录前置摄像头模式）
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var videoCapture: VideoCapture<Recorder>? = null
+    private var activeRecording: Recording? = null
+    private var onRecordingFinalized: (() -> Unit)? = null
+    private var onCameraReady: (() -> Unit)? = null
+
+    fun show(onReady: (() -> Unit)? = null) {
+        onCameraReady = onReady
+
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
 
         setupGestureDetectors()
         showCameraWindow()
-        showStopButton()
+        showControlPanel()
         startCamera()
     }
 
+    /** 只清理 UI，不停止摄像头录制（由调用方负责） */
     fun hide() {
+        removeView(cameraView)
+        removeView(panelView)
+        cameraView = null
+        panelView = null
+    }
+
+    /** 彻底销毁：停止摄像头 & 释放 lifecycle */
+    fun destroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         stopCamera()
-        removeView(cameraView)
-        removeView(stopBtnView)
-        cameraView = null
-        stopBtnView = null
     }
 
     // ── 摄像头窗口 ────────────────────────────────────────────────
@@ -109,36 +149,106 @@ class FloatingCameraWindow(
         windowManager.addView(cameraView, cameraParams)
     }
 
-    // ── 停止按钮窗口 ──────────────────────────────────────────────
+    // ── 控制面板窗口 ──────────────────────────────────────────────
 
-    private fun showStopButton() {
+    private fun showControlPanel() {
         val inflater = LayoutInflater.from(context)
-        stopBtnView = inflater.inflate(R.layout.floating_stop_button, null)
+        panelView = inflater.inflate(R.layout.floating_control_panel, null)
 
-        stopBtnView?.findViewById<ImageButton>(R.id.btn_stop)?.setOnClickListener {
+        btnTogglePanel = panelView?.findViewById(R.id.btn_toggle_panel)
+        panelButtons = panelView?.findViewById(R.id.panel_buttons)
+        btnPauseResume = panelView?.findViewById(R.id.btn_pause_resume)
+        btnToggleRecordMode = panelView?.findViewById(R.id.btn_toggle_record_mode)
+
+        // 展开/收缩按钮
+        btnTogglePanel?.setOnClickListener {
+            togglePanel()
+        }
+
+        // 停止按钮
+        panelView?.findViewById<ImageButton>(R.id.btn_stop)?.setOnClickListener {
             onStopRecording()
         }
 
-        val (bx, by) = stopBtnPosition(savedCameraX, savedCameraY, currentSize)
-        stopBtnParams = makeOverlayParams(stopBtnSizePx, stopBtnSizePx, bx, by)
-        windowManager.addView(stopBtnView, stopBtnParams)
+        // 暂停/继续按钮
+        btnPauseResume?.setOnClickListener {
+            if (isPaused) {
+                onResumeRecording()
+                isPaused = false
+                btnPauseResume?.setImageResource(R.drawable.ic_pause)
+                btnPauseResume?.contentDescription = context.getString(R.string.pause_recording)
+            } else {
+                onPauseRecording()
+                isPaused = true
+                btnPauseResume?.setImageResource(R.drawable.ic_resume)
+                btnPauseResume?.contentDescription = context.getString(R.string.resume_recording)
+            }
+        }
+
+        // 录制模式切换按钮
+        btnToggleRecordMode?.setOnClickListener {
+            if (isCameraOnlyMode) {
+                // 当前是只录摄像头 → 切换回全屏录制
+                isCameraOnlyMode = false
+                btnToggleRecordMode?.setImageResource(R.drawable.ic_record_screen)
+                btnToggleRecordMode?.contentDescription = context.getString(R.string.switch_to_camera_only)
+                // 重置暂停状态
+                isPaused = false
+                btnPauseResume?.setImageResource(R.drawable.ic_pause)
+                onSwitchToFullScreen()
+            } else {
+                // 当前是全屏录制 → 切换为只录摄像头
+                isCameraOnlyMode = true
+                btnToggleRecordMode?.setImageResource(R.drawable.ic_record_camera)
+                btnToggleRecordMode?.contentDescription = context.getString(R.string.switch_to_full_screen)
+                // 重置暂停状态
+                isPaused = false
+                btnPauseResume?.setImageResource(R.drawable.ic_pause)
+                onSwitchToCameraOnly()
+            }
+        }
+
+        // 计算面板初始位置
+        val (px, py) = panelPosition(savedCameraX, savedCameraY, currentSize)
+        panelParams = makeOverlayParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            px, py
+        )
+        windowManager.addView(panelView, panelParams)
     }
 
-    /** 计算停止按钮位置：紧贴摄像头圆形右侧，垂直居中对齐 */
-    private fun stopBtnPosition(camX: Int, camY: Int, camSize: Int): Pair<Int, Int> {
-        val bx = camX + camSize + stopBtnGapPx
-        val by = camY + (camSize - stopBtnSizePx) / 2
-        return Pair(bx, by)
-    }
-
-    /** 同步更新停止按钮位置（摄像头拖动时调用） */
-    private fun syncStopButtonPosition(camX: Int, camY: Int) {
-        val params = stopBtnParams ?: return
-        val (bx, by) = stopBtnPosition(camX, camY, currentSize)
-        params.x = bx
-        params.y = by
+    private fun togglePanel() {
+        isPanelExpanded = !isPanelExpanded
+        if (isPanelExpanded) {
+            panelButtons?.visibility = View.VISIBLE
+            btnTogglePanel?.setImageResource(R.drawable.ic_close)
+            btnTogglePanel?.contentDescription = context.getString(R.string.collapse_panel)
+        } else {
+            panelButtons?.visibility = View.GONE
+            btnTogglePanel?.setImageResource(R.drawable.ic_menu)
+            btnTogglePanel?.contentDescription = context.getString(R.string.expand_panel)
+        }
         try {
-            windowManager.updateViewLayout(stopBtnView, params)
+            windowManager.updateViewLayout(panelView, panelParams)
+        } catch (_: Exception) {}
+    }
+
+    /** 计算控制面板位置：紧贴摄像头右侧 */
+    private fun panelPosition(camX: Int, camY: Int, camSize: Int): Pair<Int, Int> {
+        val px = camX + camSize + panelGapPx
+        val py = camY
+        return Pair(px, py)
+    }
+
+    /** 同步更新控制面板位置 */
+    private fun syncPanelPosition(camX: Int, camY: Int) {
+        val params = panelParams ?: return
+        val (px, py) = panelPosition(camX, camY, currentSize)
+        params.x = px
+        params.y = py
+        try {
+            windowManager.updateViewLayout(panelView, params)
         } catch (_: Exception) {}
     }
 
@@ -155,7 +265,7 @@ class FloatingCameraWindow(
                     params.width = currentSize
                     params.height = currentSize
                     try { windowManager.updateViewLayout(cameraView, params) } catch (_: Exception) {}
-                    syncStopButtonPosition(params.x, params.y)
+                    syncPanelPosition(params.x, params.y)
                     return true
                 }
             })
@@ -185,8 +295,7 @@ class FloatingCameraWindow(
                 params.x = initialX + dx
                 params.y = initialY + dy
                 try { windowManager.updateViewLayout(cameraView, params) } catch (_: Exception) {}
-                // 停止按钮同步跟随
-                syncStopButtonPosition(params.x, params.y)
+                syncPanelPosition(params.x, params.y)
             }
         }
     }
@@ -205,8 +314,7 @@ class FloatingCameraWindow(
             params.x = 0
             params.y = 0
 
-            // 全屏时隐藏停止按钮（全屏画面不遮挡）
-            stopBtnView?.visibility = View.GONE
+            panelView?.visibility = View.GONE
         } else {
             currentSize = savedSize
             params.width = currentSize
@@ -214,12 +322,63 @@ class FloatingCameraWindow(
             params.x = savedCameraX
             params.y = savedCameraY
 
-            // 恢复停止按钮并同步位置
-            stopBtnView?.visibility = View.VISIBLE
-            syncStopButtonPosition(savedCameraX, savedCameraY)
+            panelView?.visibility = View.VISIBLE
+            syncPanelPosition(savedCameraX, savedCameraY)
         }
 
         try { windowManager.updateViewLayout(cameraView, params) } catch (_: Exception) {}
+    }
+
+    // ── CameraX 摄像头录制（只录前置摄像头模式）─────────────────────
+
+    /**
+     * 开始前置摄像头录制
+     * @param outputFile 输出文件
+     * @param onFinished 录制完成后的回调，参数为文件路径
+     */
+    fun startCameraRecording(outputFile: File, onFinished: (String) -> Unit) {
+        val vc = videoCapture ?: run {
+            Log.e(TAG, "VideoCapture not initialized")
+            return
+        }
+        val fileOutput = FileOutputOptions.Builder(outputFile).build()
+        activeRecording = vc.output
+            .prepareRecording(context, fileOutput)
+            .withAudioEnabled()
+            .start(ContextCompat.getMainExecutor(context)) { event ->
+                if (event is VideoRecordEvent.Finalize) {
+                    if (event.hasError()) {
+                        Log.e(TAG, "Camera recording error: ${event.error}")
+                    }
+                    Log.d(TAG, "Camera recording finalized: ${outputFile.absolutePath}, size=${outputFile.length()}")
+                    onFinished(outputFile.absolutePath)
+                    // 触发停止回调（如果有）
+                    onRecordingFinalized?.invoke()
+                    onRecordingFinalized = null
+                }
+            }
+        Log.d(TAG, "Camera recording started: ${outputFile.absolutePath}")
+    }
+
+    /** 停止前置摄像头录制，文件写完后回调 */
+    fun stopCameraRecording(onStopped: (() -> Unit)? = null) {
+        if (activeRecording == null) {
+            onStopped?.invoke()
+            return
+        }
+        onRecordingFinalized = onStopped
+        activeRecording?.stop()
+        activeRecording = null
+    }
+
+    /** 暂停前置摄像头录制 */
+    fun pauseCameraRecording() {
+        activeRecording?.pause()
+    }
+
+    /** 继续前置摄像头录制 */
+    fun resumeCameraRecording() {
+        activeRecording?.resume()
     }
 
     // ── 工具方法 ──────────────────────────────────────────────────
@@ -251,15 +410,27 @@ class FloatingCameraWindow(
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
             val provider = future.get()
+            cameraProvider = provider
+
             val preview = Preview.Builder().build().also {
                 it.setSurfaceProvider(previewView?.surfaceProvider)
             }
+
+            // 同时绑定 VideoCapture，供只录摄像头模式使用
+            val recorder = Recorder.Builder()
+                .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
+                .build()
+            videoCapture = VideoCapture.withOutput(recorder)
+
             val selector = CameraSelector.Builder()
                 .requireLensFacing(CameraSelector.LENS_FACING_FRONT)
                 .build()
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, selector, preview)
+                provider.bindToLifecycle(this, selector, preview, videoCapture!!)
+                Log.d(TAG, "Camera ready, videoCapture bound")
+                onCameraReady?.invoke()
+                onCameraReady = null
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -268,7 +439,9 @@ class FloatingCameraWindow(
 
     private fun stopCamera() {
         try {
-            ProcessCameraProvider.getInstance(context).get().unbindAll()
+            cameraProvider?.unbindAll()
         } catch (_: Exception) {}
+        cameraProvider = null
+        videoCapture = null
     }
 }

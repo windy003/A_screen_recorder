@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:gravity="center_horizontal">
+
+    <!-- 展开/收缩按钮（始终可见） -->
+    <ImageButton
+        android:id="@+id/btn_toggle_panel"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/ic_menu"
+        android:background="@drawable/ic_toggle_button_bg"
+        android:contentDescription="@string/expand_panel"
+        android:scaleType="centerInside"
+        android:padding="8dp" />
+
+    <!-- 可展开的功能按钮区域 -->
+    <LinearLayout
+        android:id="@+id/panel_buttons"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:visibility="gone">
+
+        <!-- 停止按钮（红色） -->
+        <ImageButton
+            android:id="@+id/btn_stop"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="6dp"
+            android:src="@drawable/ic_stop"
+            android:background="@drawable/ic_stop_button_bg"
+            android:contentDescription="@string/stop_recording"
+            android:scaleType="centerInside"
+            android:padding="10dp" />
+
+        <!-- 暂停/继续按钮（蓝色） -->
+        <ImageButton
+            android:id="@+id/btn_pause_resume"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="6dp"
+            android:src="@drawable/ic_pause"
+            android:background="@drawable/ic_pause_button_bg"
+            android:contentDescription="@string/pause_recording"
+            android:scaleType="centerInside"
+            android:padding="10dp" />
+
+        <!-- 录制模式切换按钮（绿色）：全屏录制 ↔ 只录前置摄像头 -->
+        <ImageButton
+            android:id="@+id/btn_toggle_record_mode"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="6dp"
+            android:src="@drawable/ic_record_camera"
+            android:background="@drawable/ic_mode_button_bg"
+            android:contentDescription="@string/switch_to_full_screen"
+            android:scaleType="centerInside"
+            android:padding="10dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

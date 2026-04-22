@@ -12,7 +12,7 @@ android {
         minSdk 29
         targetSdk 34
         versionCode 1
-        versionName "2026/3/3-1"
+        versionName "2026/4/22-1"
     }
 
     buildTypes {
@@ -48,6 +48,7 @@ dependencies {
     implementation "androidx.camera:camera-camera2:${camerax_version}"
     implementation "androidx.camera:camera-lifecycle:${camerax_version}"
     implementation "androidx.camera:camera-view:${camerax_version}"
+    implementation "androidx.camera:camera-video:${camerax_version}"
 
     // Lifecycle
     implementation 'androidx.lifecycle:lifecycle-service:2.7.0'

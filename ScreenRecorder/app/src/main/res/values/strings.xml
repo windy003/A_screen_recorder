@@ -19,4 +19,12 @@
     <string name="notification_channel_desc">屏幕录制进行中的通知</string>
     <string name="notification_title">正在录屏</string>
     <string name="notification_text">点击停止录制</string>
+
+    <!-- 控制面板 -->
+    <string name="expand_panel">展开控制面板</string>
+    <string name="collapse_panel">收起控制面板</string>
+    <string name="pause_recording">暂停录制</string>
+    <string name="resume_recording">继续录制</string>
+    <string name="switch_to_camera_only">切换为只录前置摄像头</string>
+    <string name="switch_to_full_screen">切换为全屏录制</string>
 </resources>
