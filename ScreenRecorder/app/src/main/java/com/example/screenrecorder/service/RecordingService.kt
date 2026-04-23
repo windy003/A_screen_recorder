@@ -27,7 +27,6 @@ import androidx.core.app.NotificationCompat
 import com.example.screenrecorder.MainActivity
 import com.example.screenrecorder.R
 import com.example.screenrecorder.ui.FloatingCameraWindow
-import com.example.screenrecorder.util.VideoMerger
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -65,9 +64,6 @@ class RecordingService : Service() {
     private var screenDensity = 0
 
     private var isCameraOnlyMode = false
-
-    // 所有录制片段，用于最终合并
-    private val segments = mutableListOf<VideoMerger.Segment>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -126,8 +122,7 @@ class RecordingService : Service() {
             }
         }, mainHandler)
 
-        // 第一个片段：只录前置摄像头
-        segments.clear()
+        // 初始模式：只录前置摄像头
         isCameraOnlyMode = true
         isRunning = true
 
@@ -153,14 +148,12 @@ class RecordingService : Service() {
         if (!isRunning) return
         isCameraOnlyMode = true
 
-        // 停止屏幕录制，保存片段信息（不需要转码）
+        // 停止屏幕录制并保存该片段
         finishCurrentScreenSegment()
 
         // 开始摄像头录制
         outputFilePath = createOutputFile()
-        floatingCameraWindow?.startCameraRecording(File(outputFilePath)) { _ ->
-            // 摄像头录制完成的回调（停止时触发）— 不在这里处理，由 stopRecording 统一合并
-        }
+        floatingCameraWindow?.startCameraRecording(File(outputFilePath)) { _ -> }
         Log.d(TAG, "Switched to camera-only: $outputFilePath")
     }
 
@@ -168,11 +161,11 @@ class RecordingService : Service() {
         if (!isRunning) return
         isCameraOnlyMode = false
 
-        // 停止摄像头录制，等文件写完后再开始屏幕录制
+        // 停止摄像头录制，等文件写完后保存并开始屏幕录制
         val cameraSegmentPath = outputFilePath
         floatingCameraWindow?.stopCameraRecording {
             Log.d(TAG, "Camera segment finalized: $cameraSegmentPath, size=${File(cameraSegmentPath).length()}")
-            segments.add(VideoMerger.Segment(cameraSegmentPath, needsTranscode = true))
+            saveToMediaStore(cameraSegmentPath)
 
             // 重新开始屏幕录制
             outputFilePath = createOutputFile()
@@ -190,7 +183,7 @@ class RecordingService : Service() {
         }
     }
 
-    /** 结束当前的屏幕录制片段，加入 segments 列表 */
+    /** 结束当前的屏幕录制片段并保存 */
     private fun finishCurrentScreenSegment() {
         try { mediaRecorder?.stop() } catch (e: Exception) {
             Log.e(TAG, "Error stopping MediaRecorder", e)
@@ -199,7 +192,7 @@ class RecordingService : Service() {
         mediaRecorder = null
         virtualDisplay?.release()
         virtualDisplay = null
-        segments.add(VideoMerger.Segment(outputFilePath, needsTranscode = false))
+        saveToMediaStore(outputFilePath)
     }
 
     // ── 暂停/继续 ─────────────────────────────────────────────────
@@ -241,11 +234,11 @@ class RecordingService : Service() {
         floatingCameraWindow?.hide()
 
         if (isCameraOnlyMode) {
-            // 摄像头录制是异步的，等 Finalize 回调后再清理
+            // 摄像头录制是异步的，等 Finalize 回调后再保存
             val lastPath = outputFilePath
             floatingCameraWindow?.stopCameraRecording {
                 Log.d(TAG, "Camera segment finalized: $lastPath, size=${File(lastPath).length()}")
-                segments.add(VideoMerger.Segment(lastPath, needsTranscode = true))
+                saveToMediaStore(lastPath)
                 finishStop()
             }
         } else {
@@ -256,7 +249,7 @@ class RecordingService : Service() {
             mediaRecorder = null
             virtualDisplay?.release()
             virtualDisplay = null
-            segments.add(VideoMerger.Segment(outputFilePath, needsTranscode = false))
+            saveToMediaStore(outputFilePath)
             finishStop()
         }
     }
@@ -268,26 +261,8 @@ class RecordingService : Service() {
         mediaProjection?.stop()
         mediaProjection = null
 
-        mergeAndSave()
-    }
-
-    private fun mergeAndSave() {
-        val allSegments = segments.toList()
-        segments.clear()
-
-        if (allSegments.isEmpty()) {
-            Log.w(TAG, "No segments to save"); return
-        }
-
-        // 调试模式：逐个保存每个片段，不合并
-        Log.d(TAG, "Saving ${allSegments.size} segments individually for debugging")
-        allSegments.forEachIndexed { index, segment ->
-            Log.d(TAG, "Segment[$index]: ${segment.filePath}, needsTranscode=${segment.needsTranscode}, exists=${File(segment.filePath).exists()}, size=${File(segment.filePath).length()}")
-            saveToMediaStore(segment.filePath)
-        }
-
         mainHandler.post {
-            Toast.makeText(this, "已保存 ${allSegments.size} 个片段", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "视频已保存", Toast.LENGTH_SHORT).show()
         }
     }
 
